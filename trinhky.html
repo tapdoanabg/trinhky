@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>window.KV_BUILD = "19/10/2026 09:58";</script>
+<script>window.KV_BUILD = "19/10/2026 11:44";</script>
 <script>document.write('<script src="config.js?t=' + Date.now() + '"><\/script>');</script>
 <title>ABG – Trình ký</title>
 <style>
@@ -182,6 +182,10 @@ details[open]>summary::before{content:'▾'}
 .type-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 .type-row:first-child{border-top:0}
 .type-row.off b{color:var(--muted);text-decoration:line-through}
+.sw{flex:none;width:58px;height:34px;border-radius:999px;border:0;background:#d6d2c8;position:relative;padding:0;transition:background .15s}
+.sw i{position:absolute;top:3px;left:3px;width:28px;height:28px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .15s}
+.sw.on{background:var(--ok)}
+.sw.on i{left:27px}
 
 /* Lớp phủ */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:20;display:flex;align-items:flex-end;justify-content:center}
@@ -290,7 +294,7 @@ details[open]>summary::before{content:'▾'}
 <div id="busy" class="hidden"><div class="spin"></div><div id="busy-text" role="status" aria-live="polite"></div></div>
 <div id="toast" class="hidden" role="status" aria-live="polite"></div>
 
-<script>if(!String(window.KV_API_URL||'').trim())document.write('<script src="core.js?v=202610190958"><\/script><script src="demo-trinhky.js?v=202610190958"><\/script>');</script>
+<script>if(!String(window.KV_API_URL||'').trim())document.write('<script src="core.js?v=202610191144"><\/script><script src="demo-trinhky.js?v=202610191144"><\/script>');</script>
 <script>
 const S = { token:null, boot:null, view:'toSign', filter:{}, showFilter:false, list:null, cur:null, detail:null, form:null, fe:null, flows:null };
 const $ = id => document.getElementById(id);
@@ -1006,12 +1010,12 @@ function syncFE(){
 }
 function renderFlowEditor(){
   const E=S.fe, staff=S.boot.staff, allDepts=[...new Set(staff.map(s=>s.dept||'Chưa xếp bộ phận').concat(S.flows.depts))].sort();
-  const types=['Tất cả'].concat(S.flows.types.filter(t=>t.status!=='Ngừng'||t.name===E.docType).map(t=>t.name));
+  const types=['Tất cả'].concat(S.flows.types.filter(t=>(t.status!=='Ngừng'&&typeOn(t,E.dept))||t.name===E.docType).map(t=>t.name));
   const keep=$('sheet').classList.contains('hidden')?0:$('sheet-body').scrollTop;
   openSheet(`<div class="sheet-head"><h2>${E.id?'Sửa luồng '+esc(E.id):'Tạo luồng ký mới'}</h2><button class="btn" onclick="closeSheet()" aria-label="Đóng">✕</button></div>
     <div class="box">
-      <label for="fe-dept">Bộ phận *</label><select id="fe-dept" class="input">${allDepts.map(d=>`<option ${E.dept===d?'selected':''}>${esc(d)}</option>`).join('')}</select>
-      <label for="fe-type">Loại văn bản *</label><select id="fe-type" class="input">${types.map(t=>`<option ${E.docType===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
+      <label for="fe-dept">Bộ phận *</label><select id="fe-dept" class="input" onchange="syncFE();renderFlowEditor()">${allDepts.map(d=>`<option ${E.dept===d?'selected':''}>${esc(d)}</option>`).join('')}</select>
+      <label for="fe-type">Loại văn bản * <span class="hint">(chỉ hiện loại dùng cho bộ phận này)</span></label><select id="fe-type" class="input">${types.map(t=>`<option ${E.docType===t?'selected':''}>${esc(t)}</option>`).join('')}</select>
       <label for="fe-name">Tên luồng</label><input id="fe-name" class="input" maxlength="100" value="${esc(E.name)}" placeholder="Để trống: tự đặt theo bộ phận + loại">
     </div>
     <div class="box"><h4>Các bước ký (tối đa ${LIM().maxSteps}) – theo thứ tự</h4>
@@ -1044,23 +1048,59 @@ async function saveFlow(){
 async function setFlowStatus(id,st){
   busy(true); try{ S.flows=await tk('setFlowStatus',id,st); renderFlows(); toast(st==='Ngừng'?'Đã tắt luồng':'Đã bật luồng','ok'); }catch(err){ handleErr(err); } finally{ busy(false); }
 }
+/* ---------- QTV: Loại văn bản theo bộ phận ---------- */
+// depts rỗng = loại dùng chung mọi bộ phận
+const typeOn = (t,d) => !(t.depts||[]).length || t.depts.indexOf(d)>=0;
 function renderTypes(){
-  const T=S.flows.types;
-  $('view-types').innerHTML=`<form class="box" onsubmit="addType(event)"><h4>🗂 Thêm loại văn bản</h4>
+  const F=S.flows, T=F.types, depts=F.depts;
+  if(!S.typeDept || depts.indexOf(S.typeDept)<0) S.typeDept = depts.indexOf(S.boot.user.dept)>=0 ? S.boot.user.dept : (depts[0]||'');
+  const D=S.typeDept, act=T.filter(t=>t.status!=='Ngừng'), stopped=T.filter(t=>t.status==='Ngừng');
+  const nOn=act.filter(t=>typeOn(t,D)).length;
+  const scope=t=>(t.depts||[]).length?esc(t.depts.join(', ')):'🌐 Dùng chung mọi bộ phận';
+  $('view-types').innerHTML=`<div class="box"><h4>🗂 Loại văn bản theo bộ phận</h4>
+      <label for="t-dept">Chọn bộ phận</label>
+      <select id="t-dept" class="input" onchange="S.typeDept=this.value;renderTypes()">${depts.map(d=>`<option ${d===D?'selected':''}>${esc(d)}</option>`).join('')}</select>
+      <p class="hint">Bật loại nào thì nhân sự <b>${esc(D)}</b> mới chọn được loại đó khi trình ký. Đang dùng <b>${nOn}/${act.length}</b> loại.</p>
+      <div>${act.map(t=>{ const on=typeOn(t,D); return `<div class="type-row">
+        <div style="min-width:0"><b>${esc(t.name)}</b><div class="hint" style="margin:0">${scope(t)}</div></div>
+        <button type="button" class="sw ${on?'on':''}" role="switch" aria-checked="${on}" aria-label="${on?'Tắt':'Bật'} ${esc(t.name)} cho ${esc(D)}" data-n="${esc(t.name)}" onclick="toggleTypeDept(this.dataset.n)"><i></i></button></div>`; }).join('')||'<p class="hint">Chưa có loại văn bản đang dùng.</p>'}</div>
+    </div>
+    <form class="box" onsubmit="addType(event)"><h4>＋ Thêm loại văn bản</h4>
       <label for="t-name">Tên loại</label><input id="t-name" class="input" maxlength="100" required placeholder="VD: Biên bản nghiệm thu">
+      <label>Áp dụng cho</label>
+      <div class="seg" role="group" aria-label="Phạm vi"><button type="button" class="${S.typeScope!=='all'?'on':''}" onclick="S.typeScope='dept';renderTypesKeep()">Chỉ ${esc(D)}</button><button type="button" class="${S.typeScope==='all'?'on':''}" onclick="S.typeScope='all';renderTypesKeep()">🌐 Mọi bộ phận</button></div>
       <div class="btn-row"><button class="btn primary block" type="submit">Thêm loại</button></div>
-      <p class="hint">Loại đã ngừng không chọn được khi trình mới; tờ trình cũ vẫn xem được.</p></form>
-    <div class="box"><h4>Danh sách loại văn bản</h4>${T.map(t=>`<div class="type-row ${t.status==='Ngừng'?'off':''}"><div style="min-width:0"><b>${esc(t.name)}</b><div class="hint" style="margin:0">${esc(t.status)}</div></div>
-      <button class="btn sm" data-n="${esc(t.name)}" onclick="toggleType(this.dataset.n,'${t.status==='Ngừng'?'Đang dùng':'Ngừng'}')">${t.status==='Ngừng'?'▶ Dùng lại':'⏸ Ngừng'}</button></div>`).join('')}</div>`;
+      <p class="hint">Sau này vẫn bật/tắt thêm cho bộ phận khác được ở danh sách phía trên.</p></form>
+    <details class="box"><summary>⚙️ Dùng chung · Ngừng · Dùng lại (${T.length} loại)</summary>
+      ${T.map(t=>`<div class="type-row ${t.status==='Ngừng'?'off':''}"><div style="min-width:0"><b>${esc(t.name)}</b><div class="hint" style="margin:0">${t.status==='Ngừng'?'Đã ngừng · ':''}${scope(t)}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+        ${(t.depts||[]).length&&t.status!=='Ngừng'?`<button class="btn sm" data-n="${esc(t.name)}" onclick="setTypeGlobal(this.dataset.n)">🌐 Dùng chung</button>`:''}
+        <button class="btn sm" data-n="${esc(t.name)}" onclick="toggleType(this.dataset.n,'${t.status==='Ngừng'?'Đang dùng':'Ngừng'}')">${t.status==='Ngừng'?'▶ Dùng lại':'⏸ Ngừng'}</button></div></div>`).join('')}
+      <p class="hint">Loại đã ngừng không chọn được khi trình mới; tờ trình cũ vẫn xem được.</p></details>`;
+}
+function renderTypesKeep(){ const v=$('t-name')?$('t-name').value:''; renderTypes(); if($('t-name')) $('t-name').value=v; }
+async function saveType(t, msg){
+  busy(true);
+  try{ [S.flows,S.boot]=await tk('multi',['saveDocType',[t]],['bootstrap',[]]); renderTypes(); toast(msg,'ok'); return true; }
+  catch(err){ handleErr(err); return false; } finally{ busy(false); }
 }
 async function addType(e){
-  e.preventDefault(); busy(true);
-  try{ [S.flows,S.boot]=await tk('multi',['saveDocType',[{name:$('t-name').value,status:'Đang dùng',isNew:true}]],['bootstrap',[]]); renderTypes(); toast('Đã thêm loại văn bản','ok'); }
-  catch(err){ handleErr(err); } finally{ busy(false); }
+  e.preventDefault();
+  const name=$('t-name').value.trim(), D=S.typeDept;
+  if(await saveType({name,status:'Đang dùng',isNew:true,depts:S.typeScope==='all'?[]:[D]}, S.typeScope==='all'?'Đã thêm loại dùng chung':'Đã thêm loại cho '+D)) $('t-name').value='';
 }
-async function toggleType(name,st){
-  busy(true); try{ [S.flows,S.boot]=await tk('multi',['saveDocType',[{name,status:st}]],['bootstrap',[]]); renderTypes(); toast(st==='Ngừng'?'Đã ngừng loại văn bản':'Đã dùng lại','ok'); }catch(err){ handleErr(err); } finally{ busy(false); }
+async function toggleTypeDept(name){
+  const t=S.flows.types.find(x=>x.name===name), D=S.typeDept, all=S.flows.depts; if(!t) return;
+  const ds=(t.depts||[]).slice();
+  let next;
+  if(typeOn(t,D)){
+    next = ds.length ? ds.filter(x=>x!==D) : all.filter(x=>x!==D);
+    if(!next.length) return toast('Loại này chỉ còn dùng cho '+D+'. Muốn bỏ hẳn, mở mục "⚙️ … Ngừng" bên dưới.','err');
+  } else next = ds.concat([D]);
+  await saveType({name, depts:next}, (typeOn(t,D)?'Đã tắt ':'Đã bật ')+'"'+name+'" cho '+D);
 }
+async function setTypeGlobal(name){ await saveType({name, depts:[]}, 'Đã đặt "'+name+'" dùng chung mọi bộ phận'); }
+async function toggleType(name,st){ await saveType({name,status:st}, st==='Ngừng'?'Đã ngừng loại văn bản':'Đã dùng lại'); }
 
 document.addEventListener('keydown',e=>{ if(e.key!=='Escape') return;
   if(!$('lightbox').classList.contains('hidden')) return $('lightbox').classList.add('hidden');

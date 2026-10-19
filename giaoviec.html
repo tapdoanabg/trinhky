@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>window.KV_BUILD = "19/10/2026 09:58";</script>
+<script>window.KV_BUILD = "19/10/2026 11:44";</script>
 <script>document.write('<script src="config.js?t=' + Date.now() + '"><\/script>');</script>
 <style>
 :root{
@@ -207,7 +207,8 @@ a.icon-btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px;w
         <label for="n-title">Tên công việc *</label>
         <input id="n-title" class="input" required maxlength="200">
         <label for="n-project">Dự án *</label>
-        <select id="n-project" class="input" required></select>
+        <select id="n-project" class="input" required onchange="onNewProject()"></select>
+        <div class="hint" id="n-project-hint"></div>
         <label for="n-desc">Mô tả / yêu cầu đầu ra</label>
         <textarea id="n-desc" class="input" placeholder="Cần làm gì, kết quả bàn giao là gì, tài liệu tham khảo…"></textarea>
         <label for="n-dept">Bộ phận *</label>
@@ -239,8 +240,9 @@ a.icon-btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px;w
         <h4>Thêm dự án</h4>
         <label for="p-name">Tên dự án</label>
         <input id="p-name" class="input" maxlength="100" required placeholder="VD: Hội nghị khách hàng 2026">
+        <div id="p-scope"></div>
         <div class="btn-row"><button class="btn primary block" type="submit">Thêm dự án</button></div>
-        <p class="hint">Chỉ Quản trị viên thấy mục này và được thêm, đóng, mở lại dự án. Dự án đã đóng không hiện khi giao việc mới; các việc cũ vẫn giữ nguyên.</p>
+        <p class="hint" id="p-hint"></p>
       </form>
       <div class="box" style="margin-bottom:40px"><h4>Danh sách dự án</h4><div id="p-list"></div></div>
     </div>
@@ -257,7 +259,7 @@ a.icon-btn{text-decoration:none;display:inline-flex;align-items:center;gap:4px;w
 <div id="busy" class="hidden"><div class="spin"></div><div id="busy-text" role="status" aria-live="polite"></div></div>
 <div id="toast" class="hidden"></div>
 
-<script>if(!String(window.KV_API_URL||'').trim())document.write('<script src="demo-giaoviec.js?v=202610190958"><\/script>');</script>
+<script>if(!String(window.KV_API_URL||'').trim())document.write('<script src="demo-giaoviec.js?v=202610191144"><\/script>');</script>
 <script>
 const S = { token:null, data:null, view:'list', cur:null, f:{q:'', status:'open', dept:'', person:'', project:'', quick:''}, newImgs:[], newPdfs:[], imgCache:{} };
 const ST_CLASS = {'Mới giao':'s-new','Đang làm':'s-doing','Chờ duyệt':'s-review','Cần sửa':'s-fix','Hoàn thành':'s-done','Hủy':'s-cancel'};
@@ -394,10 +396,10 @@ function render(){
   $('stats').innerHTML=stats.map(([k,v,c])=>`<button class="stat ${c} ${S.f.quick===k?'on':''}" onclick="quick('${k}')"><b>${v}</b><span>${k}</span></button>`).join('');
 
   if(!u.isManager && S.view!=='list') S.view='list';
-  if(!u.isAdmin && S.view==='projects') S.view='list';
+  if(!u.isManager && S.view==='projects') S.view='list';
   $('tabs').innerHTML = u.isManager
     ? `<button class="tab ${S.view==='list'?'on':''}" onclick="go('list')">Danh sách việc</button><button class="tab ${S.view==='new'?'on':''}" onclick="go('new')">+ Giao việc</button>`
-      + (u.isAdmin?`<button class="tab ${S.view==='projects'?'on':''}" onclick="go('projects')">Dự án</button>`:'')
+      + `<button class="tab ${S.view==='projects'?'on':''}" onclick="go('projects')">Dự án</button>`
     : '';
   $('view-list').classList.toggle('hidden',S.view!=='list');
   $('view-new').classList.toggle('hidden',S.view!=='new');
@@ -421,7 +423,7 @@ function render(){
   } else { fp.classList.add('hidden'); fd.classList.add('hidden'); }
 
   if(u.isManager) fillNewForm();
-  if(u.isAdmin) renderProjects();
+  if(u.isManager) renderProjects();
   renderList();
 }
 
@@ -478,6 +480,16 @@ function staffOptions(dept, selected, placeholder){
   return `<option value="">${placeholder}</option>`+S.data.staff.filter(s=>deptOf(s)===dept)
     .map(s=>`<option value="${esc(s.email)}" ${s.email===selected?'selected':''}>${esc(s.name)}</option>`).join('');
 }
+// Dự án của bộ phận nào thì chỉ giao cho nhân sự bộ phận đó; dự án dùng chung: mọi bộ phận
+function deptsForProject(name){ const ds=(S.data.projectDepts||{})[name]||[]; return ds.length?ds:deptList(); }
+function onNewProject(){
+  const pj=$('n-project').value, curDept=$('n-dept').value, ds=pj?deptsForProject(pj):deptList();
+  const pd=(S.data.projectDepts||{})[pj]||[];
+  $('n-project-hint').textContent = pj ? (pd.length?'Dự án của bộ phận '+pd.join(', ')+': chỉ giao cho nhân sự bộ phận này.':'Dự án dùng chung: giao được cho mọi bộ phận.') : '';
+  $('n-dept').innerHTML='<option value="">— Chọn bộ phận —</option>'+ds.map(x=>`<option ${x===curDept?'selected':''}>${esc(x)}</option>`).join('');
+  if(ds.length===1) $('n-dept').value=ds[0];
+  onNewDept();
+}
 function onNewDept(){
   const dep=$('n-dept').value, sel=$('n-assignee'), keep=sel.value;
   if(!dep){
@@ -496,10 +508,8 @@ function onEditDept(){
 function fillNewForm(){
   const d=S.data;
   const curProj=$('n-project').value;
-  $('n-project').innerHTML='<option value="">— Chọn dự án —</option>'+d.projects.map(p=>`<option ${p===curProj?'selected':''}>${esc(p)}</option>`).join('');
-  const curDept=$('n-dept').value;
-  $('n-dept').innerHTML='<option value="">— Chọn bộ phận —</option>'+deptList().map(x=>`<option ${x===curDept?'selected':''}>${esc(x)}</option>`).join('');
-  onNewDept();
+  $('n-project').innerHTML='<option value="">— Chọn dự án —</option>'+d.projects.map(p=>`<option value="${esc(p)}" ${p===curProj?'selected':''}>${esc(p)}${(d.projectDepts&&(d.projectDepts[p]||[]).length)?' · '+esc(d.projectDepts[p].join(', ')):''}</option>`).join('');
+  onNewProject();
   renderThumbs(); renderPdfs();
   if(S.formInit) return; S.formInit=true;
   $('n-prio').innerHTML=d.priorities.map(p=>`<option ${p==='Trung bình'?'selected':''}>${esc(p)}</option>`).join('');
@@ -621,18 +631,42 @@ async function openPdf(fid){
 }
 
 /* ---------- Dự án (Admin) ---------- */
+// Dự án theo bộ phận: depts rỗng = dùng chung mọi bộ phận
+const projScope = ds => (ds&&ds.length) ? '🏢 '+ds.join(', ') : '🌐 Dùng chung';
 function renderProjects(){
-  const all=S.data.allProjects||[];
-  const open=name=>S.data.tasks.filter(t=>t.project===name&&OPEN(t.status)).length;
-  $('p-list').innerHTML = all.length ? all.map(p=>`
+  const d=S.data, u=d.user, all=d.allProjects||[], depts=d.depts||[];
+  const open=name=>d.tasks.filter(t=>t.project===name&&OPEN(t.status)).length;
+  const myDept=u.dept||NO_DEPT;
+  // ô chọn phạm vi khi thêm dự án
+  const keep=$('p-dept')?$('p-dept').value:null;
+  $('p-scope').innerHTML = u.isAdmin
+    ? `<label for="p-dept">Bộ phận của dự án</label><select id="p-dept" class="input"><option value="">🌐 Dùng chung mọi bộ phận</option>${depts.map(x=>`<option ${x===keep?'selected':''}>${esc(x)}</option>`).join('')}</select>`
+    : `<label>Bộ phận của dự án</label><div class="input" style="background:#f1efe9;color:var(--muted);display:flex;align-items:center">🏢 ${esc(myDept)}</div>`;
+  $('p-hint').textContent = u.isAdmin
+    ? 'Quản trị viên tạo được dự án dùng chung hoặc cho bất kỳ bộ phận nào, và đổi bộ phận của dự án. Mỗi bộ phận chỉ thấy dự án của bộ phận mình và dự án dùng chung.'
+    : 'Dự án bạn tạo thuộc bộ phận '+myDept+': chỉ bộ phận này thấy và chỉ giao việc cho nhân sự trong bộ phận. Bạn được đóng, mở lại dự án của bộ phận mình.';
+  const sorted=all.slice().sort((a,b)=>(a.status==='Đã đóng')-(b.status==='Đã đóng')||a.name.localeCompare(b.name,'vi'));
+  $('p-list').innerHTML = sorted.length ? sorted.map(p=>`
     <div class="proj ${p.status==='Đã đóng'?'closed':''}">
-      <div style="min-width:0"><b>${esc(p.name)}</b><small>${esc(p.status)} · ${open(p.name)} việc đang mở${p.createdBy?' · tạo bởi '+esc(p.createdBy):''}</small></div>
-      <button class="btn" data-name="${esc(p.name)}" onclick="toggleProject(this.dataset.name)">${p.status==='Đã đóng'?'Mở lại':'Đóng'}</button>
+      <div style="min-width:0"><b>${esc(p.name)}</b><small>${projScope(p.depts)} · ${esc(p.status)} · ${open(p.name)} việc đang mở${p.createdBy?' · tạo bởi '+esc(p.createdBy):''}</small>
+        ${u.isAdmin?`<select class="input" style="margin-top:6px;min-height:40px" data-n="${esc(p.name)}" onchange="changeProjectDept(this.dataset.n,this.value)" aria-label="Đổi bộ phận của ${esc(p.name)}">
+          <option value="" ${!(p.depts||[]).length?'selected':''}>🌐 Dùng chung</option>${depts.map(x=>`<option ${(p.depts||[]).length===1&&p.depts[0]===x?'selected':''}>${esc(x)}</option>`).join('')}${(p.depts||[]).length>1?`<option value="__keep" selected>${esc(p.depts.join(', '))}</option>`:''}</select>`:''}</div>
+      ${p.canManage?`<button class="btn" data-name="${esc(p.name)}" onclick="toggleProject(this.dataset.name)">${p.status==='Đã đóng'?'Mở lại':'Đóng'}</button>`:''}
     </div>`).join('') : '<div class="empty">Chưa có dự án nào. Thêm dự án đầu tiên ở trên.</div>';
+}
+async function changeProjectDept(name,val){
+  if(val==='__keep') return;
+  busy(true);
+  try{ S.data=await call('setProjectDepts',S.token,name,val?[val]:[]); render(); toast('Đã đổi bộ phận của dự án','ok'); }
+  catch(err){ handleErr(err); render(); } finally{ busy(false); }
 }
 async function doAddProject(e){
   e.preventDefault(); busy(true);
-  try{ S.data=await call('addProject',S.token,$('p-name').value); $('p-name').value=''; render(); toast('Đã thêm dự án','ok'); }
+  try{
+    const u=S.data.user, dep=$('p-dept')?$('p-dept').value:'';
+    S.data=await call('addProject',S.token,$('p-name').value, u.isAdmin?(dep?[dep]:[]):undefined);
+    $('p-name').value=''; render(); toast('Đã thêm dự án','ok');
+  }
   catch(err){ handleErr(err); } finally{ busy(false); }
 }
 async function toggleProject(name){

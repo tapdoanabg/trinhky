@@ -125,7 +125,18 @@ function tkCore_(db, env) {
     return act.filter(function (f) { return f.docType === type; })[0] ||
       act.filter(function (f) { return f.docType === TK.ALL_TYPES; })[0] || null;
   }
-  function activeTypes() { return db.types.filter(function (t) { return t.status !== 'Ngừng'; }).map(function (t) { return t.name; }); }
+  // Loại văn bản theo bộ phận: depts rỗng = dùng chung mọi bộ phận
+  function typeDepts(t) { return Array.isArray(t.depts) ? t.depts : String(t.depts || '').split(',').map(txt).filter(Boolean); }
+  function typeFits(t, dept) { var d = typeDepts(t); return !d.length || !dept || d.indexOf(dept) >= 0; }
+  function activeTypes(dept) {
+    return db.types.filter(function (t) { return t.status !== 'Ngừng' && typeFits(t, dept); }).map(function (t) { return t.name; });
+  }
+  function typeOf(name) { return db.types.filter(function (t) { return t.name === name; })[0] || null; }
+  function allDepts() {
+    return db.staff.filter(function (s) { return s.active; }).map(function (s) { return s.dept || 'Chưa xếp bộ phận'; })
+      .concat(db.flows.map(function (f) { return f.dept; }))
+      .filter(function (d, i, a) { return d && a.indexOf(d) === i; }).sort();
+  }
   function head(r) { return '<b>' + esc(r.id + ' – ' + r.title) + '</b><br>' + esc(r.docType) + ' · ' + esc(r.dept) + (r.amount ? ' · ' + tkMoney_(r.amount) : '') + (r.urgency === 'Khẩn' ? ' · <b style="color:#c0392b">KHẨN</b>' : ''); }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function watcherEmails(r) { return watchers(r).map(function (w) { return w.email; }); }
@@ -291,7 +302,7 @@ function tkCore_(db, env) {
       return {
         user: { name: u.name, email: u.email, role: u.role, dept: u.dept, isAdmin: u.isAdmin, isManager: u.isManager },
         staff: db.staff.filter(function (s) { return s.active; }).map(function (s) { return { name: s.name, email: s.email, dept: s.dept, role: s.role }; }),
-        docTypes: activeTypes(),
+        docTypes: activeTypes(u.dept || 'Chưa xếp bộ phận'),
         counts: {
           toSign: toSign.length,
           toSignOver: toSign.filter(function (r) { return tkWorkingMs_(now, curStep(r).dueAt) < 0; }).length,
@@ -389,7 +400,8 @@ function tkCore_(db, env) {
       var title = limitText(d.title, TK.TITLE_MAX, 'Tiêu đề');
       if (!title) fail('Vui lòng nhập tiêu đề.');
       var docType = txt(d.docType);
-      if (activeTypes().indexOf(docType) < 0) fail('Vui lòng chọn loại văn bản (đang dùng).');
+      if (activeTypes(u.dept || 'Chưa xếp bộ phận').indexOf(docType) < 0)
+        fail('Loại "' + docType + '" không dùng cho bộ phận của bạn hoặc đã ngừng. Vui lòng chọn loại khác.');
       var summaryTxt = limitText(d.summary, TK.TEXT_MAX, 'Tóm tắt');
       var amount = Number(String(d.amount || '').replace(/[^\d]/g, '')) || '';
       if (amount && amount > 1e13) fail('Số tiền không hợp lệ.');
@@ -653,8 +665,7 @@ function tkCore_(db, env) {
     /* ---------- Quản trị viên: luồng ký & loại văn bản ---------- */
     listFlows: function (u) {
       if (!u.isAdmin) fail('Chỉ Quản trị viên được xem thiết lập luồng ký.');
-      var depts = db.staff.filter(function (s) { return s.active; }).map(function (s) { return s.dept || 'Chưa xếp bộ phận'; })
-        .concat(db.flows.map(function (f) { return f.dept; }));
+      var depts = allDepts();
       return {
         flows: db.flows.map(function (f) {
           return {
@@ -663,7 +674,7 @@ function tkCore_(db, env) {
             watchers: (f.watchers || []).map(function (e) { return { email: e, name: nameOf(e) }; })
           };
         }),
-        types: db.types.map(function (t) { return { name: t.name, status: t.status || 'Đang dùng', note: t.note || '' }; }),
+        types: db.types.map(function (t) { return { name: t.name, status: t.status || 'Đang dùng', note: t.note || '', depts: typeDepts(t) }; }),
         depts: depts.filter(function (d, i, a) { return d && a.indexOf(d) === i; }).sort()
       };
     },
@@ -673,7 +684,11 @@ function tkCore_(db, env) {
       f = f || {};
       var dept = txt(f.dept), type = txt(f.docType) || TK.ALL_TYPES;
       if (!dept) fail('Vui lòng chọn bộ phận.');
-      if (type !== TK.ALL_TYPES && !db.types.some(function (t) { return t.name === type; })) fail('Loại văn bản không có trong danh sách.');
+      if (type !== TK.ALL_TYPES) {
+        var tt = typeOf(type);
+        if (!tt) fail('Loại văn bản không có trong danh sách.');
+        if (!typeFits(tt, dept)) fail('Loại "' + type + '" chưa áp dụng cho bộ phận "' + dept + '". Bật loại này cho bộ phận ở mục Loại văn bản trước.');
+      }
       var steps = (f.steps || []).map(function (x, i) {
         var s = active(x.email);
         if (!s) fail('Bước ' + (i + 1) + ': vui lòng chọn người ký đang làm việc.');
@@ -731,13 +746,32 @@ function tkCore_(db, env) {
       var name = limitText(t.name, 100, 'Tên loại').replace(/\s+/g, ' ');
       if (!name) fail('Vui lòng nhập tên loại văn bản.');
       if (name === TK.ALL_TYPES) fail('Tên "' + TK.ALL_TYPES + '" dành riêng cho luồng áp dụng mọi loại.');
-      var status = t.status === 'Ngừng' ? 'Ngừng' : 'Đang dùng';
       var cur = db.types.filter(function (x) { return lc(x.name) === lc(name); })[0];
-      if (cur && t.isNew) fail('Loại "' + name + '" đã có.');
-      if (!cur) { cur = { name: name }; db.types.push(cur); }
-      cur.status = status; if (t.note !== undefined) cur.note = limitText(t.note, 200, 'Ghi chú');
+      if (cur && t.isNew) fail('Loại "' + name + '" đã có. Hãy bật loại đó cho bộ phận cần dùng.');
+      var isNew = !cur;
+      if (!cur) { cur = { name: name, status: 'Đang dùng', note: '', depts: [] }; db.types.push(cur); }
+      var before = typeDepts(cur).join(', ');
+      if (t.status !== undefined) cur.status = t.status === 'Ngừng' ? 'Ngừng' : 'Đang dùng';
+      if (t.note !== undefined) cur.note = limitText(t.note, 200, 'Ghi chú');
+      if (t.depts !== undefined) {
+        var known = allDepts(), ds = [];
+        (Array.isArray(t.depts) ? t.depts : []).forEach(function (d) {
+          d = txt(d).replace(/,/g, ' ');
+          if (!d || ds.indexOf(d) >= 0) return;
+          if (known.indexOf(d) < 0) fail('Không có bộ phận "' + d + '".');
+          ds.push(d);
+        });
+        // bỏ bộ phận đang có luồng ký riêng cho loại này → báo trước
+        if (ds.length) db.flows.forEach(function (f) {
+          if (f.status !== 'Ngừng' && f.docType === cur.name && ds.indexOf(f.dept) < 0)
+            fail('Bộ phận "' + f.dept + '" đang có luồng ký riêng cho loại này (' + f.name + '). Tắt luồng đó trước khi bỏ bộ phận.');
+        });
+        cur.depts = ds;
+      }
       dirty('types');
-      env.log('LOẠI VB', u, t.isNew ? 'Thêm loại văn bản' : (status === 'Ngừng' ? 'Ngừng loại văn bản' : 'Cập nhật loại văn bản'), name);
+      var scope = typeDepts(cur).length ? typeDepts(cur).join(', ') : 'mọi bộ phận';
+      env.log('LOẠI VB', u, isNew ? 'Thêm loại văn bản' : (t.status === 'Ngừng' ? 'Ngừng loại văn bản' : 'Cập nhật loại văn bản'),
+        name + ' · áp dụng: ' + scope + (before !== typeDepts(cur).join(', ') && !isNew ? ' (trước: ' + (before || 'mọi bộ phận') + ')' : ''));
       return api.listFlows(u);
     },
 
